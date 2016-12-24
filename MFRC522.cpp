@@ -49,12 +49,24 @@ MFRC522::MFRC522(   byte chipSelectPin,     ///< Arduino pin connected to MFRC52
                     byte mosiPin,
                     byte clockPin
                 ) {
+
     _chipSelectPin = chipSelectPin;
     _resetPowerDownPin = resetPowerDownPin;
+
     _misoPin = misoPin;
+    _misoPin_bit = digitalPinToBitMask(misoPin);
+    _misoPin_port = portInputRegister(digitalPinToPort(misoPin));
+
     _mosiPin = mosiPin;
+    _mosiPin_bit = digitalPinToBitMask(mosiPin);
+    _mosiPin_port = portOutputRegister(digitalPinToPort(mosiPin));
+
     _clockPin = clockPin;
+    _clockPin_bit = digitalPinToBitMask(clockPin);
+    _clockPin_port = portOutputRegister(digitalPinToPort(clockPin));
+
     _bitBangSpi = true;
+
 } // End constructor
 
 /////////////////////////////////////////////////////////////////////////////////////
@@ -78,10 +90,26 @@ byte MFRC522::spiTransfer(byte value)
         byte recv = 0;
 
         for (int i = 7; i >= 0; i--) {
-            digitalWrite(_mosiPin, bitRead(value, i));  // Set MOSI
-            digitalWrite(_clockPin, HIGH);              // SCK high
-            bitWrite(recv, i, digitalRead(_misoPin));   // Capture MISO
-            digitalWrite(_clockPin, LOW);               // SCK low
+
+            // Set MOSI
+            if (bitRead(value, i)) {
+                *_mosiPin_port |= _mosiPin_bit;
+            } else {
+                *_mosiPin_port &= ~_mosiPin_bit;
+            }
+
+            // SCK high
+            *_clockPin_port |= _clockPin_bit;
+
+            // Capture MISO
+            if (*_misoPin_port & _misoPin_bit) {
+                bitSet(recv, i);
+            } else {
+                bitClear(recv, i);
+            }
+
+            // SCK low
+            *_clockPin_port &= ~_clockPin_bit;
         }
 
         return recv;

@@ -415,8 +415,16 @@ private:
     byte _resetPowerDownPin;    // Arduino pin connected to MFRC522's reset and power down input (Pin 6, NRSTPD, active low)
 
     byte _misoPin;
+    uint8_t _misoPin_bit;
+    volatile uint8_t *_misoPin_port;
+
     byte _mosiPin;
+    uint8_t _mosiPin_bit;
+    volatile uint8_t * _mosiPin_port;
+
     byte _clockPin;
+    uint8_t _clockPin_bit;
+    volatile uint8_t *_clockPin_port;
 
     bool _bitBangSpi;
 
