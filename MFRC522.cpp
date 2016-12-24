@@ -7,6 +7,7 @@
 #include <Arduino.h>
 #include <MFRC522.h>
 
+
 /////////////////////////////////////////////////////////////////////////////////////
 // Functions for setting up the Arduino
 /////////////////////////////////////////////////////////////////////////////////////
@@ -14,6 +15,7 @@
  * Constructor.
  */
 MFRC522::MFRC522() {
+    _bitBangSpi = false;
 } // End constructor
 
 /**
@@ -22,6 +24,7 @@ MFRC522::MFRC522() {
  */
 MFRC522::MFRC522(	byte resetPowerDownPin	///< Arduino pin connected to MFRC522's reset and power down input (Pin 6, NRSTPD, active low)
 				): MFRC522(SS, resetPowerDownPin) { // SS is defined in pins_arduino.h
+    _bitBangSpi = false;
 } // End constructor
 
 /**
@@ -33,7 +36,66 @@ MFRC522::MFRC522(	byte chipSelectPin,		///< Arduino pin connected to MFRC522's S
 				) {
 	_chipSelectPin = chipSelectPin;
 	_resetPowerDownPin = resetPowerDownPin;
+    _bitBangSpi = false;
 } // End constructor
+
+/**
+ * Constructor.
+ * Prepares the output pins.
+ */
+MFRC522::MFRC522(	byte chipSelectPin,		///< Arduino pin connected to MFRC522's SPI slave select input (Pin 24, NSS, active low)
+					byte resetPowerDownPin,	///< Arduino pin connected to MFRC522's reset and power down input (Pin 6, NRSTPD, active low)
+                    byte misoPin,
+                    byte mosiPin,
+                    byte clockPin
+				) {
+	_chipSelectPin = chipSelectPin;
+	_resetPowerDownPin = resetPowerDownPin;
+    _misoPin = misoPin;
+    _mosiPin = mosiPin;
+    _clockPin = clockPin;
+    _bitBangSpi = true;
+} // End constructor
+
+/////////////////////////////////////////////////////////////////////////////////////
+// SPI Transfer functions
+/////////////////////////////////////////////////////////////////////////////////////
+
+void MFRC522::spiBegin()
+{
+    if (!_bitBangSpi) {
+        SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
+    }
+
+    digitalWrite(_chipSelectPin, LOW);		// Select slave
+}
+
+byte MFRC522::spiTransfer(byte value)
+{
+    if (!_bitBangSpi) {
+        return SPI.transfer(value);
+    } else {
+        byte recv = 0;
+
+        for (int i = 7; i >= 0; i--) {
+            digitalWrite(_mosiPin, bitRead(value, i));  // Set MOSI
+            digitalWrite(_clockPin, HIGH);              // SCK high
+            bitWrite(recv, i, digitalRead(_misoPin));   // Capture MISO
+            digitalWrite(_clockPin, LOW);               // SCK low
+        }
+
+        return recv;
+    }
+}
+
+void MFRC522::spiEnd()
+{
+    digitalWrite(_chipSelectPin, HIGH);		// Release slave again
+
+    if (!_bitBangSpi) {
+        SPI.endTransaction(); // Stop using the SPI bus
+    }
+}
 
 /////////////////////////////////////////////////////////////////////////////////////
 // Basic interface functions for communicating with the MFRC522
@@ -46,12 +108,10 @@ MFRC522::MFRC522(	byte chipSelectPin,		///< Arduino pin connected to MFRC522's S
 void MFRC522::PCD_WriteRegister(	byte reg,		///< The register to write to. One of the PCD_Register enums.
 									byte value		///< The value to write.
 								) {
-	SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
-	digitalWrite(_chipSelectPin, LOW);		// Select slave
-	SPI.transfer(reg & 0x7E);				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
-	SPI.transfer(value);
-	digitalWrite(_chipSelectPin, HIGH);		// Release slave again
-	SPI.endTransaction(); // Stop using the SPI bus
+    spiBegin();
+	spiTransfer(reg & 0x7E);				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
+	spiTransfer(value);
+    spiEnd();
 } // End PCD_WriteRegister()
 
 /**
@@ -62,14 +122,12 @@ void MFRC522::PCD_WriteRegister(	byte reg,		///< The register to write to. One o
 									byte count,		///< The number of bytes to write to the register
 									byte *values	///< The values to write. Byte array.
 								) {
-	SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
-	digitalWrite(_chipSelectPin, LOW);		// Select slave
-	SPI.transfer(reg & 0x7E);				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
+    spiBegin();
+	spiTransfer(reg & 0x7E);				// MSB == 0 is for writing. LSB is not used in address. Datasheet section 8.1.2.3.
 	for (byte index = 0; index < count; index++) {
-		SPI.transfer(values[index]);
+		spiTransfer(values[index]);
 	}
-	digitalWrite(_chipSelectPin, HIGH);		// Release slave again
-	SPI.endTransaction(); // Stop using the SPI bus
+    spiEnd();
 } // End PCD_WriteRegister()
 
 /**
@@ -79,12 +137,11 @@ void MFRC522::PCD_WriteRegister(	byte reg,		///< The register to write to. One o
 byte MFRC522::PCD_ReadRegister(	byte reg	///< The register to read from. One of the PCD_Register enums.
 								) {
 	byte value;
-	SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
-	digitalWrite(_chipSelectPin, LOW);			// Select slave
-	SPI.transfer(0x80 | (reg & 0x7E));			// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
-	value = SPI.transfer(0);					// Read the value back. Send 0 to stop reading.
-	digitalWrite(_chipSelectPin, HIGH);			// Release slave again
-	SPI.endTransaction(); // Stop using the SPI bus
+
+    spiBegin();
+	spiTransfer(0x80 | (reg & 0x7E));			// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
+	value = spiTransfer(0);					// Read the value back. Send 0 to stop reading.
+    spiEnd();
 	return value;
 } // End PCD_ReadRegister()
 
@@ -103,10 +160,11 @@ void MFRC522::PCD_ReadRegister(	byte reg,		///< The register to read from. One o
 	//Serial.print(F("Reading ")); 	Serial.print(count); Serial.println(F(" bytes from register."));
 	byte address = 0x80 | (reg & 0x7E);		// MSB == 1 is for reading. LSB is not used in address. Datasheet section 8.1.2.3.
 	byte index = 0;							// Index in values array.
-	SPI.beginTransaction(SPISettings(SPI_CLOCK_DIV4, MSBFIRST, SPI_MODE0));	// Set the settings to work with SPI bus
-	digitalWrite(_chipSelectPin, LOW);		// Select slave
+
+    spiBegin();
+
 	count--;								// One read is performed outside of the loop
-	SPI.transfer(address);					// Tell MFRC522 which address we want to read
+	spiTransfer(address);					// Tell MFRC522 which address we want to read
 	while (index < count) {
 		if (index == 0 && rxAlign) {		// Only update bit positions rxAlign..7 in values[0]
 			// Create bit mask for bit positions rxAlign..7
@@ -115,18 +173,18 @@ void MFRC522::PCD_ReadRegister(	byte reg,		///< The register to read from. One o
 				mask |= (1 << i);
 			}
 			// Read value and tell that we want to read the same address again.
-			byte value = SPI.transfer(address);
+			byte value = spiTransfer(address);
 			// Apply mask to both current value of values[0] and the new data in value.
 			values[0] = (values[index] & ~mask) | (value & mask);
 		}
 		else { // Normal case
-			values[index] = SPI.transfer(address);	// Read value and tell that we want to read the same address again.
+			values[index] = spiTransfer(address);	// Read value and tell that we want to read the same address again.
 		}
 		index++;
 	}
-	values[index] = SPI.transfer(0);			// Read the final byte. Send 0 to stop reading.
-	digitalWrite(_chipSelectPin, HIGH);			// Release slave again
-	SPI.endTransaction(); // Stop using the SPI bus
+	values[index] = spiTransfer(0);			// Read the final byte. Send 0 to stop reading.
+
+    spiEnd();
 } // End PCD_ReadRegister()
 
 /**
@@ -200,6 +258,15 @@ void MFRC522::PCD_Init() {
 	// Set the chipSelectPin as digital output, do not select the slave yet
 	pinMode(_chipSelectPin, OUTPUT);
 	digitalWrite(_chipSelectPin, HIGH);
+
+    if (_bitBangSpi) {
+        pinMode(_misoPin, INPUT);
+
+        pinMode(_mosiPin, OUTPUT);
+
+        pinMode(_clockPin, OUTPUT);
+        digitalWrite(_clockPin, LOW);
+    }
 	
 	// Set the resetPowerDownPin as digital output, do not reset or power down.
 	pinMode(_resetPowerDownPin, OUTPUT);
